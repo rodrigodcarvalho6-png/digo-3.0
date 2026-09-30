@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Central de Iluminação IoT - Arduino Porta 13</title>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Font Awesome Icons CDN -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Paho MQTT Client Library CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Plus Jakarta Sans', 'sans-serif'],
+                    },
+                    colors: {
+                        navy: {
+                            800: '#1e293b',
+                            900: '#0f172a',
+                            950: '#020617',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        /* Custom Glowing & Pulse Effects */
+        .led-off {
+            background: radial-gradient(circle, #cbd5e1 0%, #94a3b8 100%);
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.15), 0 0 10px rgba(148, 163, 184, 0.2);
+        }
+
+        .led-on {
+            background: radial-gradient(circle, #ff5555 0%, #e11d48 100%);
+            box-shadow: 0 0 35px rgba(225, 29, 72, 0.8), 0 0 15px rgba(244, 63, 94, 0.5), inset 0 2px 4px rgba(255, 255, 255, 0.6);
+            animation: glowPulse 2s infinite ease-in-out;
+        }
+
+        @keyframes glowPulse {
+            0% {
+                box-shadow: 0 0 25px rgba(225, 29, 72, 0.7), 0 0 10px rgba(244, 63, 94, 0.4);
+            }
+            50% {
+                box-shadow: 0 0 45px rgba(225, 29, 72, 0.95), 0 0 20px rgba(244, 63, 94, 0.7);
+            }
+            100% {
+                box-shadow: 0 0 25px rgba(225, 29, 72, 0.7), 0 0 10px rgba(244, 63, 94, 0.4);
+            }
+        }
+
+        /* Glassmorphism Styling */
+        .glass-card {
+            background: rgba(255, 255, 255, 0.75);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.8);
+        }
+
+        /* Scrollbar custom para logs */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: rgba(241, 245, 249, 0.5);
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+    </style>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-sky-100 via-sky-50 to-slate-100 font-sans text-slate-800 flex flex-col justify-between p-4 md:p-8 antialiased selection:bg-sky-500 selection:text-white">
+
+    <!-- Container Central Principal -->
+    <main class="max-w-2xl w-full mx-auto my-auto">
+        <div class="glass-card rounded-3xl p-6 md:p-10 shadow-2xl shadow-sky-900/10 transition-all duration-300">
+            
+            <!-- Cabeçalho com Titulo e Status Pill -->
+            <header class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200/80 pb-6 mb-8">
+                <div>
+                    <h1 class="text-2xl md:text-3xl font-bold tracking-tight text-slate-900 flex items-center gap-3">
+                        <span class="p-2.5 bg-sky-500/10 text-sky-600 rounded-2xl inline-flex">
+                            <i class="fa-solid fa-lightbulb"></i>
+                        </span>
+                        Central IoT
+                    </h1>
+                    <p class="text-xs md:text-sm font-medium text-slate-500 mt-1 flex items-center gap-2">
+                        <i class="fa-solid fa-microchip text-slate-400"></i>
+                        Controle Hardware &bull; Arduino Porta 13
+                    </p>
+                </div>
+
+                <!-- Status de Conexão (Pill) -->
+                <div id="status-pill" class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200/80 transition-all duration-300 self-start sm:self-center shadow-sm">
+                    <span id="status-dot" class="w-2.5 h-2.5 rounded-full bg-amber-500 animate-ping"></span>
+                    <span id="status-text">Sincronizando...</span>
+                </div>
+            </header>
+
+            <!-- Seção de Tópico MQTT Interativo -->
+            <section class="mb-8">
+                <label for="mqtt-topic" class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
+                    Tópico MQTT Ativo
+                </label>
+                <div class="relative flex items-center">
+                    <div class="absolute left-3.5 text-slate-400 pointer-events-none text-sm">
+                        <i class="fa-solid fa-hashtag"></i>
+                    </div>
+                    <input type="text" id="mqtt-topic" value="gerry_sanchez_led_exclusivo/arduino" 
+                        class="w-full pl-10 pr-24 py-3 bg-white/80 border border-slate-200 focus:border-sky-500 focus:ring-4 focus:ring-sky-500/10 rounded-xl text-sm font-mono text-slate-700 transition-all outline-none shadow-sm"
+                        placeholder="Informe o tópico...">
+                    <button id="btn-update-topic" onclick="updateTopic()" 
+                        class="absolute right-1.5 px-3.5 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-xs font-medium transition-all duration-200 hover:shadow-md active:scale-95">
+                        Atualizar
+                    </button>
+                </div>
+            </section>
+
+            <!-- Área Visual do LED (Simulador Central) -->
+            <section class="flex flex-col items-center justify-center py-8 mb-8 bg-white/40 border border-slate-200/60 rounded-2xl">
+                <div id="led-indicator" class="w-28 h-28 md:w-36 md:h-36 rounded-full led-off flex items-center justify-center transition-all duration-500 relative">
+                    <i id="led-icon" class="fa-solid fa-power-off text-3xl md:text-4xl text-slate-600 transition-all duration-300"></i>
+                </div>
+                <div class="mt-5 text-center">
+                    <span id="led-status-text" class="text-sm font-semibold text-slate-500 uppercase tracking-wider block">
+                        Dispositivo Inativo
+                    </span>
+                    <span id="topic-display" class="text-xs text-slate-400 font-mono mt-0.5 block">
+                        porta: D13
+                    </span>
+                </div>
+            </section>
+
+            <!-- Botões de Controle -->
+            <section class="grid grid-cols-2 gap-4 mb-8">
+                <button id="btn-on" onclick="sendMQTTCommand('LIGAR')" disabled 
+                    class="py-4 px-6 bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed disabled:shadow-none text-white font-bold rounded-2xl shadow-lg shadow-emerald-500/25 hover:shadow-emerald-500/40 transition-all duration-200 active:scale-98 flex items-center justify-center gap-2 text-sm md:text-base">
+                    <i class="fa-solid fa-bolt"></i>
+                    Ligar LED
+                </button>
+                
+                <button id="btn-off" onclick="sendMQTTCommand('DESLIGAR')" disabled 
+                    class="py-4 px-6 bg-rose-500 hover:bg-rose-600 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed disabled:shadow-none text-white font-bold rounded-2xl shadow-lg shadow-rose-500/25 hover:shadow-rose-500/40 transition-all duration-200 active:scale-98 flex items-center justify-center gap-2 text-sm md:text-base">
+                    <i class="fa-solid fa-power-off"></i>
+                    Desligar LED
+                </button>
+            </section>
+
+            <!-- Console Terminal de Logs (Expansível) -->
+            <section class="border-t border-slate-200/80 pt-6">
+                <div class="flex items-center justify-between mb-3">
+                    <span class="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                        <i class="fa-solid fa-terminal text-sky-600"></i>
+                        Monitor Serial / Logs
+                    </span>
+                    <button onclick="clearLogs()" class="text-xs text-slate-400 hover:text-slate-600 font-medium transition-colors">
+                        <i class="fa-solid fa-trash-can mr-1"></i>Limpar
+                    </button>
+                </div>
+                <div id="log-container" class="h-28 bg-slate-900/90 text-slate-300 font-mono text-xs p-3.5 rounded-xl overflow-y-auto custom-scrollbar flex flex-col gap-1.5 shadow-inner">
+                    <div class="text-slate-500 italic">[SISTEMA] Inicializando aplicação...</div>
+                </div>
+            </section>
+
+        </div>
+    </main>
+
+    <!-- Rodapé Discreto -->
+    <footer class="text-center py-4 text-xs text-slate-400 font-medium">
+        MQTT Broker Público: <span class="font-mono text-slate-500">broker.hivemq.com:8884 (SSL)</span>
+    </footer>
+
+    <!-- Script de Lógica MQTT e Interface -->
+    <script>
+        // Configurações do Broker HiveMQ
+        const BROKER = "broker.hivemq.com";
+        const PORT = 8884; // WebSocket Seguro SSL
+        
+        // Estado
+        let client = null;
+        let currentTopic = "gerry_sanchez_led_exclusivo/arduino";
+        let isConnected = false;
+
+        // Elementos DOM
+        const statusPill = document.getElementById("status-pill");
+        const statusDot = document.getElementById("status-dot");
+        const statusText = document.getElementById("status-text");
+        const btnOn = document.getElementById("btn-on");
+        const btnOff = document.getElementById("btn-off");
+        const ledIndicator = document.getElementById("led-indicator");
+        const ledIcon = document.getElementById("led-icon");
+        const ledStatusText = document.getElementById("led-status-text");
+        const logContainer = document.getElementById("log-container");
+        const topicInput = document.getElementById("mqtt-topic");
+
+        // Função para Adicionar Log na Tela
+        function addLog(message, type = 'info') {
+            const time = new Date().toLocaleTimeString('pt-BR');
+            const logItem = document.createElement("div");
+            
+            let typeColor = 'text-slate-300';
+            if (type === 'success') typeColor = 'text-emerald-400';
+            if (type === 'error') typeColor = 'text-rose-400';
+            if (type === 'warning') typeColor = 'text-amber-400';
+            if (type === 'mqtt') typeColor = 'text-sky-300';
+
+            logItem.className = typeColor;
+            logItem.innerHTML = `<span class="text-slate-500">[${time}]</span> ${message}`;
+            logContainer.appendChild(logItem);
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+
+        function clearLogs() {
+            logContainer.innerHTML = '<div class="text-slate-500 italic">[SISTEMA] Logs limpos.</div>';
+        }
+
+        // Atualização Visual do Status de Conexão
+        function updateStatus(state) {
+            if (state === 'connecting') {
+                statusPill.className = "inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200/80 transition-all duration-300 shadow-sm";
+                statusDot.className = "w-2.5 h-2.5 rounded-full bg-amber-500 animate-ping";
+                statusText.innerText = "Sincronizando...";
+                setControlsEnabled(false);
+            } else if (state === 'connected') {
+                statusPill.className = "inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/80 transition-all duration-300 shadow-sm";
+                statusDot.className = "w-2.5 h-2.5 rounded-full bg-emerald-500";
+                statusText.innerText = "Sistema Online";
+                setControlsEnabled(true);
+            } else if (state === 'disconnected' || state === 'error') {
+                statusPill.className = "inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200/80 transition-all duration-300 shadow-sm";
+                statusDot.className = "w-2.5 h-2.5 rounded-full bg-rose-500";
+                statusText.innerText = "Conexão Perdida";
+                setControlsEnabled(false);
+            }
+        }
+
+        function setControlsEnabled(enabled) {
+            btnOn.disabled = !enabled;
+            btnOff.disabled = !enabled;
+        }
+
+        // Atualização da Pré-visualização do LED na Tela
+        function setLEDState(isOn) {
+            if (isOn) {
+                ledIndicator.className = "w-28 h-28 md:w-36 md:h-36 rounded-full led-on flex items-center justify-center transition-all duration-500 relative";
+                ledIcon.className = "fa-solid fa-lightbulb text-4xl md:text-5xl text-white drop-shadow-md transition-all duration-300";
+                ledStatusText.innerText = "LED Porta 13 LIGADO";
+                ledStatusText.className = "text-sm font-bold text-rose-600 uppercase tracking-wider block";
+            } else {
+                ledIndicator.className = "w-28 h-28 md:w-36 md:h-36 rounded-full led-off flex items-center justify-center transition-all duration-500 relative";
+                ledIcon.className = "fa-solid fa-power-off text-3xl md:text-4xl text-slate-600 transition-all duration-300";
+                ledStatusText.innerText = "Dispositivo Inativo";
+                ledStatusText.className = "text-sm font-semibold text-slate-500 uppercase tracking-wider block";
+            }
+        }
+
+        // Conectar ao Broker MQTT via Paho
+        function connectMQTT() {
+            // Gerar Client ID Aleatório Único
+            const clientId = "WebClient_Arduino_" + Math.random().toString(16).substring(2, 10);
+            addLog(`Iniciando cliente com ID: <span class="font-mono text-xs">${clientId}</span>`, 'info');
+
+            updateStatus('connecting');
+
+            client = new Paho.MQTT.Client(BROKER, Number(PORT), clientId);
+
+            // Handlers de Eventos
+            client.onConnectionLost = onConnectionLost;
+            client.onMessageArrived = onMessageArrived;
+
+            // Opções de Conexão com SSL ativado
+            const options = {
+                useSSL: true,
+                timeout: 10,
+                onSuccess: onConnectSuccess,
+                onFailure: onConnectFailure
+            };
+
+            addLog(`Conectando a ${BROKER}:${PORT} via WebSockets (SSL)...`, 'info');
+            client.connect(options);
+        }
+
+        function onConnectSuccess() {
+            isConnected = true;
+            addLog(`Conectado ao broker MQTT com sucesso!`, 'success');
+            updateStatus('connected');
+            
+            // Inscrever no Tópico Inicial
+            subscribeToTopic(currentTopic);
+        }
+
+        function onConnectFailure(responseObject) {
+            isConnected = false;
+            addLog(`Falha na conexão: ${responseObject.errorMessage}`, 'error');
+            updateStatus('error');
+        }
+
+        function onConnectionLost(responseObject) {
+            isConnected = false;
+            if (responseObject.errorCode !== 0) {
+                addLog(`Conexão perdida: ${responseObject.errorMessage}`, 'error');
+            }
+            updateStatus('disconnected');
+            setLEDState(false);
+        }
+
+        function subscribeToTopic(topicName) {
+            if (client && isConnected) {
+                client.subscribe(topicName, {
+                    onSuccess: () => {
+                        addLog(`Inscrito com sucesso no tópico: <b class="text-sky-300">${topicName}</b>`, 'mqtt');
+                    },
+                    onFailure: (err) => {
+                        addLog(`Erro ao inscrever no tópico: ${err.errorMessage}`, 'error');
+                    }
+                });
+            }
+        }
+
+        function unsubscribeFromTopic(topicName) {
+            if (client && isConnected) {
+                client.unsubscribe(topicName, {
+                    onSuccess: () => {
+                        addLog(`Desinscrito do tópico anterior: ${topicName}`, 'warning');
+                    }
+                });
+            }
+        }
+
+        // Envio de Comando para o Arduino
+        function sendMQTTCommand(command) {
+            if (!client || !isConnected) {
+                addLog("Impossível enviar comando. Sistema offline.", 'error');
+                return;
+            }
+
+            const message = new Paho.MQTT.Message(command);
+            message.destinationName = currentTopic;
+            client.send(message);
+
+            addLog(`Comando publicado: <b>${command}</b> &rarr; [${currentTopic}]`, 'mqtt');
+
+            // Atualiza simulador localmente para feedback imediato
+            if (command === 'LIGAR') {
+                setLEDState(true);
+            } else if (command === 'DESLIGAR') {
+                setLEDState(false);
+            }
+        }
+
+        // Recebimento de Mensagens MQTT
+        function onMessageArrived(message) {
+            const payload = message.payloadString.trim();
+            addLog(`Mensagem recebida [${message.destinationName}]: <b>${payload}</b>`, 'mqtt');
+
+            if (payload === "LIGAR" || payload === "ON" || payload === "1") {
+                setLEDState(true);
+            } else if (payload === "DESLIGAR" || payload === "OFF" || payload === "0") {
+                setLEDState(false);
+            }
+        }
+
+        // Troca Dinâmica do Tópico de Aula
+        function updateTopic() {
+            const newTopic = topicInput.value.trim();
+
+            if (!newTopic) {
+                addLog("O nome do tópico não pode estar vazio.", 'error');
+                return;
+            }
+
+            if (newTopic === currentTopic) {
+                addLog("O novo tópico é igual ao atual.", 'warning');
+                return;
+            }
+
+            // Desinscrever do antigo e inscrever no novo
+            unsubscribeFromTopic(currentTopic);
+            currentTopic = newTopic;
+            subscribeToTopic(currentTopic);
+
+            addLog(`Tópico ativo alterado para: <b>${currentTopic}</b>`, 'success');
+        }
+
+        // Inicialização Automática ao Carregar a Página
+        window.addEventListener('load', () => {
+            connectMQTT();
+        });
+    </script>
+</body>
+</html>
